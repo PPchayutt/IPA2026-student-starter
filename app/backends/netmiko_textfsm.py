@@ -4,6 +4,7 @@ from netmiko.exceptions import (
     NetmikoAuthenticationException,
     NetmikoTimeoutException,
 )
+from ntc_templates.parse import parse_output
 
 
 def _normalize_interface_name(name):
@@ -28,22 +29,35 @@ def _connect(router):
 
 
 def _query_cli_state(conn, interface_name):
-    ip_info = conn.send_command(
+    raw_ip = conn.send_command(
         f"show ip interface {interface_name}",
-        use_textfsm=True,
+        use_textfsm=False,
     )
     descriptions = conn.send_command(
         "show interfaces description",
         use_textfsm=True,
     )
-    if isinstance(ip_info, str):
-        lower = ip_info.lower()
-        if "invalid" in lower or "deleted" in lower or not lower.strip():
-            ip_info = []
-        else:
-            raise RuntimeError("TextFSM failed to parse show ip interface")
     if isinstance(descriptions, str):
         descriptions = []
+
+    raw_lower = raw_ip.lower() if isinstance(raw_ip, str) else ""
+    if (
+        not raw_lower.strip()
+        or "invalid input" in raw_lower
+        or "incomplete command" in raw_lower
+    ):
+        return [], descriptions
+
+    ip_info = parse_output(
+        platform="cisco_ios",
+        command="show ip interface",
+        data=raw_ip,
+    )
+    ip_info = [
+        item
+        for item in ip_info
+        if str(item.get("link_status", "")).strip().lower() != "deleted"
+    ]
     return ip_info, descriptions
 
 
@@ -54,26 +68,20 @@ def _default_netmiko_get(router, interface_name):
 
 def _default_netmiko_delete(router, interface_name):
     with _connect(router) as conn:
-        ip_info, descriptions = _query_cli_state(conn, interface_name)
+        ip_info, _ = _query_cli_state(conn, interface_name)
         exists = any(
             _normalize_interface_name(item.get("interface", "")) == interface_name
             for item in ip_info
-        ) or any(
-            _normalize_interface_name(item.get("port", "")) == interface_name
-            for item in descriptions
         )
         if not exists:
             return "not_found"
 
         conn.send_config_set([f"no interface {interface_name}"])
 
-        ip_info_after, descriptions_after = _query_cli_state(conn, interface_name)
+        ip_info_after, _ = _query_cli_state(conn, interface_name)
         still_exists = any(
             _normalize_interface_name(item.get("interface", "")) == interface_name
             for item in ip_info_after
-        ) or any(
-            _normalize_interface_name(item.get("port", "")) == interface_name
-            for item in descriptions_after
         )
         if still_exists:
             raise RuntimeError("Interface still present after delete")
@@ -104,7 +112,10 @@ def get_interface_state(
     try:
         ip_record = None
         for item in ip_info:
-            if _normalize_interface_name(item.get("interface", "")) == interface_name:
+            if (
+                _normalize_interface_name(item.get("interface", "")) == interface_name
+                and str(item.get("link_status", "")).strip().lower() != "deleted"
+            ):
                 ip_record = item
                 break
 
