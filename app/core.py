@@ -1,5 +1,6 @@
 import yaml
 
+
 def validate_request(data):
     """
     Validate one IPA2026 desired-state request.
@@ -19,27 +20,30 @@ def validate_request(data):
         "10.0.29.101", "10.0.29.102", "10.0.29.103", "10.0.29.104", "10.0.29.105"
     }
     if "router" not in data or data["router"] is None:
-        return{"status": "error", "result": "missing_router"}
-    if data["router"] not in ALLOWED_ROUTERS:
-        return{"status": "error", "result": "invalid_router"}
+        return {"status": "error", "result": "missing_router"}
+    if not isinstance(data["router"], str) or data["router"] not in ALLOWED_ROUTERS:
+        return {"status": "error", "result": "invalid_router"}
 
     # 3. method
     ALLOWED_METHODS = {"restconf", "netconf", "ansible", "netmiko-textfsm"}
     if "method" not in data or data["method"] is None:
-        return{"status": "error", "result": "missing_method"}
-    if data["method"] not in ALLOWED_METHODS:
-        return{"status": "error", "result": "invalid_method"}
+        return {"status": "error", "result": "missing_method"}
+    if not isinstance(data["method"], str) or data["method"] not in ALLOWED_METHODS:
+        return {"status": "error", "result": "invalid_method"}
 
     # 4. action
     VALID_METHOD_ACTIONS = {
         "restconf": {"status", "plan", "apply"},
-        "netconf" : {"status", "plan", "apply"},
-        "ansible" : {"apply"},
-        "netmiko-textfsm" : {"status", "delete"},
+        "netconf": {"status", "plan", "apply"},
+        "ansible": {"apply"},
+        "netmiko-textfsm": {"status", "delete"},
     }
     if "action" not in data or data["action"] is None:
-        return {"status": "error", "result" : "missing_action"}
-    if data["action"] not in VALID_METHOD_ACTIONS.get(data["method"], set()):
+        return {"status": "error", "result": "missing_action"}
+    if (
+        not isinstance(data["action"], str)
+        or data["action"] not in VALID_METHOD_ACTIONS.get(data["method"], set())
+    ):
         return {"status": "error", "result": "invalid_action"}
 
     # 5. desired, interface, name
@@ -61,7 +65,10 @@ def validate_request(data):
             return {"status": "error", "result": "missing_description"}
         if "admin_state" not in interface or interface["admin_state"] is None:
             return {"status": "error", "result": "missing_admin_state"}
-        if interface["admin_state"] not in {"up", "down"}:
+        if (
+            not isinstance(interface["admin_state"], str)
+            or interface["admin_state"] not in {"up", "down"}
+        ):
             return {"status": "error", "result": "invalid_admin_state"}
 
     # ถ้าผ่านเงื่อนไขด้านบนมาได้ทั้งหมด
@@ -74,9 +81,9 @@ def process_request_file(path):
     and return a response dictionary.
     """
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
-    except yaml.YAMLError:
+    except (yaml.YAMLError, OSError):
         return {"status": "error", "result": "invalid_yaml"}
 
     return validate_request(data)
